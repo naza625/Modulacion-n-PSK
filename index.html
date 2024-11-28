@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TFL-Comunicaciones</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+</head>
+<body>
+    <div class="nav">
+        <h4>Nazarena Fernanda Riquelme Villafañez</h4>
+        <h3>Trabajo Final - Modulacion N-PSK</h3>
+        <h4>UTN.FRT - Catedra de Comunicaciones - 3K1</h4>
+    </div>
+    <div class="container">
+        <div class="message">
+            
+            <div class="modparams">
+                <label for="level">Elegir modulacion:</label>
+                <select name="level" id="level" onchange="updateChars()">
+                <option value="2">2</option>
+                <option value="4">4</option>
+                <option value="8">8</option>
+                <option selected value="16">16</option>
+                </select>
+                <label>- PSK <span id="alert"></span></label>
+            </div>
+
+            <label for="message">Mensaje:</label>
+            <input id="message" type="text" onkeyup="getInputText()" maxlength="4" placeholder="hola">
+
+            <div class="texts">
+                <b>ASCII:&nbsp;</b> 
+                <div id="ASCIIText"></div>
+            </div>
+            <div class="texts">
+                <b>Binario+Paridad:&nbsp;</b>
+                <div id="BinaryText"></div>
+            </div>
+
+            <button id="modsignal" type="button">Modular</button>
+
+        </div>
+        <div id="constelacion"></div>
+    </div>
+    <div class="signalContainer">
+        <div id="moduladas"></div>
+    </div>
+    <script type="py" config='{"packages":["numpy","matplotlib"]}'>
+        import js
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from pyodide.ffi.wrappers import add_event_listener
+        from pyscript import display
+        from js import window
+
+        # Función para convertir una cadena binaria en una lista de bits
+        def cadena_a_bits(cadena_binaria):
+            return np.array([int(bit) for bit in cadena_binaria])
+
+        # Convertir cadena binaria en símbolos de log2(n) bits
+        def bin_to_symbols(binary_string, bits_per_symbol):
+            return [int(binary_string[i:i+bits_per_symbol], 2) for i in range(0, len(binary_string), bits_per_symbol)]
+
+        def generar_constelacion_psk(n, simbolos_usados):
+            # Genera las coordenadas de la constelación
+            margen = 1.4
+            angulos = [2 * np.pi * k / n for k in range(n)]
+            angulos_grados = [np.degrees(angulo) for angulo in angulos]
+            coordenadas_I = [np.cos(angulo) for angulo in angulos]
+            coordenadas_Q = [np.sin(angulo) for angulo in angulos]
+        
+            # Crear la figura y el eje
+            size = 5
+            fig, axs = plt.subplots(figsize=(size, size))
+        
+            # Plotear los puntos de la constelación
+            colores = ['red' if i in simbolos_usados else '#1f77b4' for i in range(n)]
+            axs.scatter(coordenadas_I, coordenadas_Q, c=colores, s=100, label="Puntos de la Constelación")
+        
+            # Dibujar líneas desde el centro a cada punto de la constelación
+            for I, Q in zip(coordenadas_I, coordenadas_Q):
+                axs.plot([0, I], [0, Q], 'k--', linewidth=0.7)  # Línea punteada desde el origen hasta el punto
+        
+            # Etiquetar cada punto de la constelación con su símbolo binario
+            for i, (I, Q, angulo_grado) in enumerate(zip(coordenadas_I, coordenadas_Q, angulos_grados)):
+                simbolo_binario = format(i, f'0{int(np.log2(n))}b')  # Convertir el índice a binario
+                etiqueta = f"{simbolo_binario}\n{angulo_grado:.0f}°"
+                axs.text(I * 1.2, Q * 1.19, etiqueta, ha='center', va='center', fontsize=11)
+        
+            # Configuración del gráfico
+            axs.axhline(0, color='gray', lw=0.5)
+            axs.axvline(0, color='gray', lw=0.5)
+            axs.set_title(f"Constelación de {n}-PSK")
+            axs.grid(False)
+            axs.set_aspect('equal', adjustable='box')
+            axs.set_yticks([])
+            axs.set_xticks([])
+        
+            axs.set_xlim(-margen, margen)
+            axs.set_ylim(-margen, margen)
+        
+            plt.subplots_adjust(left=0.01, right=1, bottom=0.01, top=0.94)
+        
+            display(fig, target="constelacion")
+        
+            plt.close(fig)        
+
+        def modular_n_psk(senal_digital, frecuencia_portadora, tasa_baud, duracion_bit, n, amplitud):
+            # Generar las fases para n-PSK
+            fases = [2 * np.pi * k / n for k in range(n)]
+            num_muestras = len(senal_digital) * tasa_baud
+            t = np.linspace(0, len(senal_digital), num_muestras)
+            señal_modulada = np.zeros(num_muestras)
+        
+            for i, simbolo in enumerate(senal_digital):
+                inicio = i * tasa_baud
+                fin = (i + 1) * tasa_baud
+                # Modificar solo la fase de la señal portadora
+                señal_modulada[inicio:fin] = amplitud * np.sin(2 * np.pi * frecuencia_portadora * t[inicio:fin] + fases[simbolo])
+        
+            return t, señal_modulada
+
+        # Función para graficar las señales
+        def graficar_senales_moduladas(senal_orig, senal_mod, t, type, yrange, bits_per_symbol, n):
+
+            fig, axs = plt.subplots(1, 1, figsize=(19, 3.9))
+
+            # Graficar la señal analogica
+            axs.plot(t, senal_mod, label="Señal Analógica", linewidth=2.25)
+            axs.set_title("Señal Analógica "+type)
+            axs.set_yticks(yrange)
+            axs.set_xticks(np.arange(len(senal_orig)))
+            axs.set_xticklabels([''] * len(senal_orig))  # Dejar los ticks sin etiquetas
+            #axs.set_ylabel("Amplitud")
+            axs.grid(True)
+            axs.legend()
+
+            # Ajustar la posición vertical de las etiquetas de los bits
+            offset_y = yrange[0] - 0.15  # Ajusta este valor según sea necesario
+
+            # Añadir etiquetas de subconjuntos de bits en el eje x
+            for i, simbolo in enumerate(senal_orig):
+                # Convertir el índice del símbolo a su representación binaria y en grados
+                simbolo_binario = format(simbolo, f'0{bits_per_symbol}b')  # Conversión a binario
+                angulo = simbolo * (360 / n)  # Ángulo correspondiente en grados para este símbolo
+
+                # Mostrar el subconjunto de bits y su fase en grados
+                label = f"{simbolo_binario}\n{angulo:.0f}°"
+                axs.text(i + 0.5, offset_y, label, ha='center', va='top', fontsize=11, color='black', fontweight='bold')
+
+            # Ajustar el diseño y mostrar el gráfico
+            #plt.tight_layout()
+            plt.subplots_adjust(left=0.02, right=0.99, bottom=0.1, top=0.94)
+
+            display(fig, target = "moduladas")
+
+            plt.close(fig)
+
+        # Definir funcion de modulacion
+        def getMod(event):
+            # Parámetros de la modulación
+            binary_string = js.document.getElementById("BinaryText").innerText
+            if binary_string == "":
+                return window.clearMod()
+
+            nivel = int(js.document.getElementById("level").value)
+            bits_per_symbol = int(np.log2(nivel))
+
+            # Truncar la cadena binaria si no es divisible por bits_per_symbol
+            max_length = (len(binary_string) // bits_per_symbol) * bits_per_symbol
+            if len(binary_string) % bits_per_symbol != 0:
+                binary_string = binary_string[:max_length]
+
+            amplitude = 1 #int(js.document.getElementById("amplitude").value or 1)
+            yrange = [-amplitude,0,amplitude]
+            frecuencia_portadora = 1  # Frecuencia en Hz
+            tasa_baud = 100  # Tasa de símbolos (o bits) por segundo
+            duracion_bit = 1 / tasa_baud
+
+            # Convertir la cadena binaria a bits
+            senal_digital = bin_to_symbols(binary_string, bits_per_symbol)
+            t, senal_mod = modular_n_psk(senal_digital, frecuencia_portadora, tasa_baud, duracion_bit, nivel, amplitude)               
+
+            window.clearMod()
+            # Graficar las señales moduladas
+            graficar_senales_moduladas(senal_digital, senal_mod, t, str(nivel) + "-PSK", yrange, bits_per_symbol, nivel)
+
+            generar_constelacion_psk(nivel, set(senal_digital))
+
+        # Asociar el evento de clic con la función
+        btn2 = js.document.getElementById("modsignal")
+        add_event_listener(btn2, "click", getMod)
+    </script>
+    <script src="./javascript.js"></script>
+</body>
+</html>
